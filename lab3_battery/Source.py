@@ -1,64 +1,131 @@
 import numpy as np
 import pandas as pd
-from bokeh.models import CustomJS, ColumnDataSource
-from bokeh.models.widgets import Button
-from bokeh.plotting import figure, output_file, show
+import matplotlib.pyplot as plt
 import numpy.polynomial.polynomial as poly
-import scipy.stats
+import math
 
-df = pd.read_csv("CSV.txt")
+# Plot capacity and weight of the batteries.
+if True:
+    xl = pd.ExcelFile("MELASTA_Li-Polymer.xlsx")
+    df = xl.parse("Sheet1")
 
-plot = figure(plot_width=400, plot_height=400)
-plot = figure(title="Data from the tests")
-plot.grid.grid_line_alpha=0.3
-plot.xaxis.axis_label = 'Duty cycle'
-plot.yaxis.axis_label = 'Grams'
+    df1 = df[df.columns[3:5]]
+    df1 = df1[df1.index != 0]
+    df1 = df1[df1.index != 1]
+    df1 = df1[df1.index != 30]
+    df1 = df1[df1.index != 35]
+    df1 = df1[df1.index != 103]
+    df1 = df1[df1.index != 130]
+    df1 = df1[df1.index != 131]
+    df1 = df1[df1.index != 132]
 
-average = (df['CW_Small1'] + df['CW_Small2'] + df['CW_Small3']) / 3
+    df1['Unnamed: 4'] = df1['Unnamed: 4'].map(lambda x: x.split('±', 1)[0])
 
-plot.line(df['Duty_cycle'], df['CW_Small1'], color='red', legend='CW_Small_1')
-plot.line(df['Duty_cycle'], df['CW_Small2'], color='green', legend='CW_Small_2')
-plot.line(df['Duty_cycle'], df['CW_Small3'], color='blue', legend='CW_Small_3')
-plot.line(df['Duty_cycle'], df['CW_Big'], color='black', legend='CW_Big')
-plot.line(df['Duty_cycle'], df['CCW_Big'], color='orange', legend='CCW_Big')
-plot.legend.location = "top_left"
+    df1 = df1.astype(float)
 
-#show(plot)
+    print(df1)
 
-regression = poly.polyfit(df['Duty_cycle'], average, 1)
+    corr = df1.corr()
 
+    print(corr)
 
-print(regression)
+    #plt.plot(df1['Unnamed: 3'], df1['Unnamed: 4'], 'ro')
+    #plt.show()
 
-t = np.linspace(0, 100, 100)
+    fig = plt.figure()
+    plt.plot(df1['Unnamed: 3'], df1['Unnamed: 4'], 'ro')
+    fig.suptitle('Capacity and weight of Li-Po batteries', fontsize=20)
+    plt.xlabel('Capacity (mAh)', fontsize=18)
+    plt.ylabel('Weight (g)', fontsize=16)
+    #fig.savefig('test.jpg')
+    plt.show()
 
-regressionLine = regression[0] + regression[1] * t
+# Plot voltage as a function of time.
+if False:
+    data = pd.read_csv('log-2016-01-14.txt', sep="	", header=None)
+    df = data[data.columns[[4,11]]]
 
-plot_reg = figure(plot_width=400, plot_height=400)
-plot_reg = figure(title="Average of the small rotor and the result of regression")
-plot_reg.grid.grid_line_alpha=0.3
-plot_reg.xaxis.axis_label = 'Duty cycle'
-plot_reg.yaxis.axis_label = 'Grams'
+    df.columns = ["Time", "Voltage"]
 
-plot_reg.line(df['Duty_cycle'], average, color='purple', legend='Average')
-plot_reg.line(t, regressionLine, color='orange', legend='Linear function, y = 8.29x - 51.20')
-plot_reg.legend.location = "top_left"
+    fig = plt.figure()
+    plt.plot(df['Time'], df['Voltage'], 'ro')
+    fig.suptitle('Discharge curve of battery', fontsize=20)
+    plt.xlabel('GNSS time', fontsize=18)
+    plt.ylabel('Voltage', fontsize=16)
+    plt.show()
 
-#show(plot_reg)
+# Transform the data and make fits to estimate SOC.
+if True:
+    data = pd.read_csv('log-2016-01-14.txt', sep="	", header=None)
+    df = data[data.columns[[4,11]]]
+    print(df)
 
-df_bat = pd.read_csv("Battery.txt")
-plot_bat = figure(plot_width=400, plot_height=400)
-plot_bat = figure(title="Voltage drops of the battery")
-plot_bat.grid.grid_line_alpha=0.3
-plot_bat.xaxis.axis_label = 'Test number'
-plot_bat.yaxis.axis_label = 'Voltage'
+    df.columns = ["Time", "Voltage"]
 
-plot_bat.circle(df_bat['Test'], df_bat['Before'], color='blue', legend='Voltage before testing', radius=0.05)
-plot_bat.circle(df_bat['Test'], df_bat['After'], color='red', legend='Voltage after testing', radius=0.05)
-plot_bat.legend.location = "top_center"
+    toZero = 114854
+    gap2init = 115959 - toZero
+    gap2 = 120002 - 115959
+    gap3init = 125956 - toZero - gap2
+    gap3 = 130004 - 125956
+    gap4init = 135958 - toZero - gap3 - gap2
+    gap4 = 140001 - 135958
+    df["Time"] = df["Time"] - 114854
+    df["Time"] = df["Time"].apply(lambda x: x - gap2 if x > gap2init else x)
+    df["Time"] = df["Time"].apply(lambda x: x - gap3 if x > gap3init else x)
+    df["Time"] = df["Time"].apply(lambda x: x - gap4 if x > gap4init else x)
 
-show(plot_bat)
+    totalDif = 144514 - 114854 - gap2 - gap3 - gap4
 
-slope, intercept, r_value, p_value, std_err = scipy.stats.linregress(df['Duty_cycle'], average)
-print(r_value**2)
+    df["Time"] = df["Time"] / totalDif * 100
 
+    divider1 = 3400
+    divider2 = 600
+
+    volFirstLast = np.array([df.ix[4215, 'Voltage'], df.ix[0, 'Voltage']])
+    timeFirstLast = np.array([df.ix[0, 'Time'], df.ix[4215, 'Time']])
+
+    vol1 = np.array([df.ix[4215, 'Voltage'], df.ix[divider1, 'Voltage']])
+    time1 = np.array([df.ix[0, 'Time'], df.ix[4215-divider1, 'Time']])
+
+    vol2 = np.array([df.ix[divider1, 'Voltage'], df.ix[divider2, 'Voltage']])
+    time2 = np.array([df.ix[4215-divider1, 'Time'], df.ix[4215-divider2, 'Time']])
+
+    vol3 = np.array([df.ix[divider2, 'Voltage'], df.ix[0, 'Voltage']])
+    time3 = np.array([df.ix[4215-divider2, 'Time'], df.ix[4215, 'Time']])
+
+    #print(poly.polyfit(df['Voltage'], df['Time'][::-1], 4))
+    firstLastVals = poly.polyfit(volFirstLast, timeFirstLast, 1)
+    part1vals = poly.polyfit(vol1, time1, 1)
+    part2vals = poly.polyfit(vol2, time2, 1)
+    part3vals = poly.polyfit(vol3, time3, 1)
+
+    t = np.linspace(3.19, 4.15, 100)
+    t1 = np.linspace(vol1[0], vol1[1], 100)
+    t2 = np.linspace(vol2[0], vol2[1], 100)
+    t3 = np.linspace(vol3[0], vol3[1], 100)
+
+    lineFirstLast = firstLastVals[0] + firstLastVals[1] * t
+    splitPart1 = part1vals[0] + part1vals[1]*t1
+    splitPart2 = part2vals[0] + part2vals[1]*t2
+    splitPart3 = part3vals[0] + part3vals[1]*t3
+
+    fig = plt.figure()
+    plt.plot(df['Voltage'], df['Time'][::-1], 'ro')
+    plt.plot(t, lineFirstLast, 'lightgreen')
+    plt.plot(t1, splitPart1, 'b')
+    plt.plot(t2, splitPart2, 'b')
+    plt.plot(t3, splitPart3, 'b')
+    fig.suptitle('Estimating SOC with voltage', fontsize=20)
+    plt.xlabel('Voltage', fontsize=18)
+    plt.ylabel('SOC', fontsize=16)
+    plt.legend(['Data points', 'Linear fit from start- to endpoint', 'Divided into three linear fits'], loc='upper left')
+    plt.show()
+
+    print(firstLastVals)
+    print(part1vals)
+    print(part2vals)
+    print(part3vals)
+
+    print(vol1)
+    print(vol2)
+    print(vol3)
